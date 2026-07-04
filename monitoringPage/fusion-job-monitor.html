@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fusion Job Monitor</title>
+<style>
+  :root {
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --accent:      #2a78d6;
+    --good:        #0ca30c;
+    --good-text:   #006300;
+    --warning:     #fab219;
+    --critical:    #d03b3b;
+    --track:       #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink-2:     #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --baseline:  #383835;
+      --border:    rgba(255,255,255,0.10);
+      --accent:    #3987e5;
+      --good:      #0ca30c;
+      --good-text: #0ca30c;
+      --warning:   #fab219;
+      --critical:  #d03b3b;
+      --track:     #383835;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+
+  h1 { font-size: 20px; font-weight: 650; margin: 0 0 2px; }
+  .subtitle { color: var(--ink-2); margin: 0 0 20px; }
+
+  .pagehead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .byline { text-align: right; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+  .byline .who { font-weight: 650; color: var(--ink); font-size: 13px; }
+  .byline a { color: var(--accent); text-decoration: none; }
+  .byline a:hover { text-decoration: underline; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  /* ---- connection form ---- */
+  form.conn { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--ink-2); }
+  .field input, .field select {
+    background: var(--page);
+    color: var(--ink);
+    border: 1px solid var(--baseline);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font: inherit;
+    min-width: 170px;
+  }
+  .field select { min-width: 140px; }
+  .field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .field.url { flex: 1 1 320px; }
+  .field.url input { width: 100%; }
+
+  button.apply {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 20px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.apply:hover { filter: brightness(1.08); }
+  button.apply:disabled { opacity: 0.55; cursor: default; }
+
+  .autorow { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 13px; padding-bottom: 9px; }
+
+  .statusline { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 1.4em; }
+  .statusline.error { color: var(--critical); }
+  .statusline .hint { display: block; color: var(--muted); margin-top: 4px; }
+
+  /* ---- stat tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 20px 0; }
+  .tiles[hidden] { display: none; }
+  .tile .label { font-size: 12px; color: var(--ink-2); }
+  .tile .value { font-size: 34px; font-weight: 600; line-height: 1.15; margin-top: 2px; }
+  .tile .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .tile.failed  .value { color: var(--critical); }
+  .tile.success .value { color: var(--good-text); }
+
+  /* ---- jobs table ---- */
+  .tablecard { padding: 0; overflow: hidden; }
+  .tablecard h2 { font-size: 14px; font-weight: 650; margin: 0; padding: 14px 16px 10px; }
+  .tscroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 8px 12px; border-top: 1px solid var(--grid); white-space: nowrap; }
+  th {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    border-top: none; border-bottom: 1px solid var(--baseline);
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.jobname { white-space: normal; min-width: 220px; font-weight: 550; cursor: pointer; }
+  td.jobname .caret { color: var(--muted); display: inline-block; width: 14px; transition: transform .12s; }
+  tr.open td.jobname .caret { transform: rotate(90deg); }
+  tr.jobrow:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+  /* mini success/fail split bar */
+  .split { display: flex; gap: 2px; width: 120px; height: 8px; }
+  .split span { border-radius: 4px; min-width: 3px; }
+  .split .ok   { background: var(--good); }
+  .split .bad  { background: var(--critical); }
+  .split .oth  { background: var(--track); }
+
+  /* state chip: icon + label, never color alone */
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 600;
+    padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--ink-2);
+  }
+  .chip .dot { font-size: 11px; }
+  .chip.ok   .dot { color: var(--good); }
+  .chip.bad  { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 40%, transparent); }
+  .chip.bad  .dot { color: var(--critical); }
+  .chip.warn .dot { color: var(--warning); }
+  .chip.run  .dot { color: var(--accent); }
+
+  /* expanded run detail */
+  tr.detail > td { padding: 0 12px 12px 38px; white-space: normal; }
+  tr.detail table { font-size: 13px; }
+  tr.detail th, tr.detail td { padding: 5px 10px; }
+  .empty { padding: 28px 16px; color: var(--muted); text-align: center; }
+
+  /* PVO / BICC section */
+  #pvoCard { margin-top: 16px; }
+  .pvo-summary { display: flex; flex-wrap: wrap; gap: 16px; padding: 0 16px 12px; font-size: 13px; color: var(--ink-2); }
+  .pvo-summary b { font-size: 15px; color: var(--ink); }
+  .pvo-summary .f b { color: var(--critical); }
+  .pvo-summary .s b { color: var(--good-text); }
+  #bipCard td.jobn { white-space: normal; min-width: 160px; max-width: 260px; overflow-wrap: anywhere; }
+  #bipCard td.rpt  { white-space: normal; min-width: 220px; max-width: 420px; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13px; }
+
+  footer { margin-top: 18px; font-size: 12px; color: var(--muted); }
+  footer code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pagehead">
+    <div>
+      <h1>Fusion Job Monitor</h1>
+      <p class="subtitle">Scheduled processes (ESS job requests) — <span id="rangeLabel">last 24 hours</span></p>
+    </div>
+    <div class="byline">
+      <div class="who">Created by Vamshi Krishna Damidi</div>
+      AI/ML &amp; Quantum Computing enthusiast<br>
+      <a href="https://vkdvamshi.github.io" target="_blank" rel="noopener">vkdvamshi.github.io</a><br>
+      email: <a href="mailto:vkdvamshi@outlook.com">vkdvamshi@outlook.com</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <form class="conn" id="connForm" autocomplete="off">
+      <div class="field url">
+        <label for="baseUrl">Fusion base URL</label>
+        <input id="baseUrl" type="url" placeholder="https://yourpod.fa.ocs.oraclecloud.com" required>
+      </div>
+      <div class="field">
+        <label for="user">Username</label>
+        <input id="user" type="text" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="pass">Password</label>
+        <input id="pass" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="field">
+        <label for="range">Time range</label>
+        <select id="range">
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+        </select>
+      </div>
+      <button class="apply" id="applyBtn" type="submit">Apply</button>
+      <div class="autorow">
+        <input type="checkbox" id="autoRefresh">
+        <label for="autoRefresh">Auto-refresh every 60s</label>
+      </div>
+    </form>
+    <div class="statusline" id="statusLine"></div>
+  </div>
+
+  <div class="tiles" id="tiles" hidden>
+    <div class="card tile">
+      <div class="label" id="tTotalLabel">Job runs</div>
+      <div class="value" id="tTotal">–</div>
+      <div class="sub" id="tDistinct"></div>
+    </div>
+    <div class="card tile failed">
+      <div class="label">Failed</div>
+      <div class="value" id="tFailed">–</div>
+      <div class="sub" id="tFailedPct"></div>
+    </div>
+    <div class="card tile success">
+      <div class="label">Succeeded</div>
+      <div class="value" id="tSucceeded">–</div>
+      <div class="sub" id="tWarning"></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Running or queued</div>
+      <div class="value" id="tRunning">–</div>
+      <div class="sub" id="tOther"></div>
+    </div>
+  </div>
+
+  <div class="card tablecard" id="tableCard" hidden>
+    <h2>Jobs by execution count <span style="color:var(--muted);font-weight:400">— click a row for individual runs</span></h2>
+    <div class="tscroll">
+      <table id="jobsTable">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th class="num">Runs</th>
+            <th class="num">Succeeded</th>
+            <th class="num">Failed</th>
+            <th class="num">Other</th>
+            <th>Outcome</th>
+            <th>Last run</th>
+            <th>Last state</th>
+          </tr>
+        </thead>
+        <tbody id="jobsBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="emptyMsg" hidden>No job requests found in the selected time range.</div>
+  </div>
+
+  <div class="card tablecard" id="pvoCard" hidden>
+    <h2>PVO extract runs (BICC) <span style="color:var(--muted);font-weight:400">— ESS requests whose job definition is a BICC / BI Cloud extract</span></h2>
+    <div class="pvo-summary" id="pvoSummary"></div>
+    <div class="tscroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Request ID</th>
+            <th>Job</th>
+            <th>State</th>
+            <th>Result</th>
+            <th>Submitted</th>
+            <th>Started</th>
+            <th>Duration</th>
+            <th>Submitted by</th>
+          </tr>
+        </thead>
+        <tbody id="pvoBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="pvoEmpty" hidden>No PVO extract (BICC) runs found in the selected time range.
+      <br><span style="font-size:12px">If your BICC extracts are scheduled from the BICC Console, they may run under a job definition this
+      user cannot see, or under a name not matching BICC / BIACM / BI Cloud Extract — check the main table above for the actual job name.</span></div>
+  </div>
+
+  <div class="card tablecard" id="bipCard" hidden style="margin-top:16px">
+    <h2>BIP report jobs <span style="color:var(--muted);font-weight:400">— BI Publisher scheduled report history (ScheduleService)</span></h2>
+    <div class="pvo-summary" id="bipSummary"></div>
+    <div class="statusline error" id="bipError" style="padding:0 16px 12px" hidden></div>
+    <div class="tscroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Duration</th>
+            <th>Owner</th>
+            <th>Report</th>
+          </tr>
+        </thead>
+        <tbody id="bipBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="bipEmpty" hidden>No BIP report jobs found in the selected time range.</div>
+  </div>
+
+  <footer>
+    Data sources: <code>GET /ess/rest/scheduler/v1/requests</code> (Fusion 23B+, Basic auth) and
+    <code>POST /xmlpserver/services/v2/ScheduleService</code> (BI Publisher getAllScheduledReportHistory).
+    Credentials stay in this page and are sent only to the host you enter; nothing is stored.
+    If requests are blocked by CORS, serve this page with <code>python3 cors-proxy.py</code> and open
+    <code>http://localhost:8765/fusion-job-monitor.html</code>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/* State classification (ESS request states)                           */
+/* ------------------------------------------------------------------ */
+const FAILED_STATES  = new Set(["ERROR", "ERROR_AUTO_RETRY", "ERROR_MANUAL_RECOVERY", "VALIDATION_FAILED", "FINISHED_ERROR"]);
+const SUCCESS_STATES = new Set(["SUCCEEDED", "FINISHED", "COMPLETED"]);
+const WARNING_STATES = new Set(["WARNING", "SUCCEEDED_WITH_WARNING"]);
+const RUNNING_STATES = new Set(["RUNNING", "WAIT", "READY", "BLOCKED", "HOLD", "PAUSED", "RETRYING", "PENDING_VALIDATION", "SCHEDULED", "CANCELLING"]);
+
+function classify(state) {
+  const s = String(state || "").toUpperCase();
+  if (FAILED_STATES.has(s))  return "failed";
+  if (WARNING_STATES.has(s)) return "warning";
+  if (SUCCESS_STATES.has(s)) return "succeeded";
+  if (RUNNING_STATES.has(s)) return "running";
+  return "other"; // CANCELLED, EXPIRED, unknown states
+}
+
+/* ------------------------------------------------------------------ */
+/* Fetch layer — direct, or via local cors-proxy.py when served by it  */
+/* ------------------------------------------------------------------ */
+function viaProxy() {
+  // cors-proxy.py serves this page on localhost:8765 and exposes /fusion?url=…
+  return location.protocol.startsWith("http") &&
+         (location.hostname === "localhost" || location.hostname === "127.0.0.1");
+}
+
+function basicAuth(user, pass) {
+  const raw = `${user}:${pass}`;
+  try { return "Basic " + btoa(raw); }
+  catch { // non-Latin-1 characters in credentials
+    return "Basic " + btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
+  }
+}
+
+async function fusionGet(fullUrl, auth) {
+  const target = viaProxy() ? "/fusion?url=" + encodeURIComponent(fullUrl) : fullUrl;
+  const resp = await fetch(target, {
+    headers: { "Authorization": auth, "Accept": "application/json" },
+  });
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error(`Authentication failed (HTTP ${resp.status}). Check the username/password and that the user has a scheduler role.`);
+  }
+  if (!resp.ok) {
+    const body = (await resp.text()).slice(0, 300);
+    const err = new Error(`HTTP ${resp.status} from Fusion. ${body}`);
+    err.httpStatus = resp.status;
+    throw err;
+  }
+  return resp.json();
+}
+
+/* Fetch requests, optionally only those submitted after `sinceIso` (null = full history), following pagination. */
+async function fetchRequests(base, auth, sinceIso) {
+  const root = base.replace(/\/+$/, "") + "/ess/rest/scheduler/v1/requests";
+  const q = sinceIso ? "q=" + encodeURIComponent(`submissionTime gt "${sinceIso}"`) : "";
+  const sep = q ? "&" : "";
+
+  let first;
+  try {
+    first = await fusionGet(`${root}?${q}${sep}fields=@full`, auth);
+  } catch (e) {
+    if (e.httpStatus === 400) first = await fusionGet(`${root}${q ? "?" + q : ""}`, auth); // pod rejects fields=@full on collections
+    else throw e;
+  }
+
+  const items = Array.isArray(first.items) ? [...first.items] : [];
+  const total = typeof first.count === "number" ? first.count : items.length;
+  const seen = new Set(items.map(i => i.requestId));
+
+  // Additional pages via /requests/search/{pageIndex}; stop on dupes, errors, or a sane cap.
+  for (let page = 2; items.length < total && page <= 100; page++) {
+    let data;
+    try { data = await fusionGet(`${root}/search/${page}${q ? "?" + q : ""}`, auth); }
+    catch { break; }
+    const pageItems = Array.isArray(data.items) ? data.items : [];
+    const fresh = pageItems.filter(i => !seen.has(i.requestId));
+    if (fresh.length === 0) break;
+    fresh.forEach(i => seen.add(i.requestId));
+    items.push(...fresh);
+  }
+  return items;
+}
+
+/* ------------------------------------------------------------------ */
+/* Aggregation                                                         */
+/* ------------------------------------------------------------------ */
+function aggregate(items, cutoffMs) {
+  // Server-side filter is applied, but re-filter locally in case the pod ignores q=
+  const runs = items.filter(it => {
+    const t = Date.parse(it.submissionTime || it.processStartTime || "");
+    return Number.isFinite(t) ? t >= cutoffMs : true;
+  });
+
+  const summary = { total: runs.length, failed: 0, succeeded: 0, warning: 0, running: 0, other: 0 };
+  const jobs = new Map();
+
+  for (const it of runs) {
+    const bucket = classify(it.state);
+    summary[bucket === "warning" ? "warning" : bucket]++;
+
+    const name = it.jobDisplayName || it.name || it.jobDefinitionId || "(unnamed job)";
+    if (!jobs.has(name)) {
+      jobs.set(name, { name, runs: 0, succeeded: 0, failed: 0, warning: 0, running: 0, other: 0, lastTime: 0, lastState: "", items: [] });
+    }
+    const j = jobs.get(name);
+    j.runs++;
+    j[bucket === "warning" ? "warning" : bucket]++;
+    j.items.push(it);
+    const t = Date.parse(it.submissionTime || "") || 0;
+    if (t >= j.lastTime) { j.lastTime = t; j.lastState = it.state; }
+  }
+
+  const jobList = [...jobs.values()].sort((a, b) => b.runs - a.runs || b.failed - a.failed || a.name.localeCompare(b.name));
+  jobList.forEach(j => j.items.sort((a, b) => (Date.parse(b.submissionTime || "") || 0) - (Date.parse(a.submissionTime || "") || 0)));
+  return { summary, jobList, runs };
+}
+
+/* PVO extract runs surface as ESS requests with a BICC extract job definition,
+   e.g. JobDefinition://oracle/apps/ess/custom/BICC_Extract_Job */
+const BICC_RE = /bicc|biacm|bi[\s_]?cloud[\s_]?extract/i;
+function isPvoRun(it) {
+  return BICC_RE.test([it.definition, it.jobDefinitionId, it.jobDisplayName, it.name, it.application]
+    .filter(Boolean).join(" "));
+}
+
+/* ------------------------------------------------------------------ */
+/* BIP report jobs — BI Publisher ScheduleService (SOAP)               */
+/* ------------------------------------------------------------------ */
+function bipBucket(status) {
+  const s = String(status || "").toUpperCase().trim();
+  if (s === "S" || s.includes("SUCCESS")) return "succeeded";
+  if (s === "F" || s.includes("FAIL") || s.includes("ERROR") || s.includes("PROBLEM")) return "failed";
+  if (s === "R" || s.includes("RUN")) return "running";
+  if (s === "W" || s.includes("WARN")) return "warning";
+  return "other"; // cancelled, deleted, suspended, scheduled, skipped…
+}
+
+function bipEnvelope(user, pass, beginIdx) {
+  const x = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:v2="http://xmlns.oracle.com/oxp/service/v2">
+  <soapenv:Body>
+    <v2:getAllScheduledReportHistory>
+      <v2:filter></v2:filter>
+      <v2:beginIdx>${beginIdx}</v2:beginIdx>
+      <v2:userID>${x(user)}</v2:userID>
+      <v2:password>${x(pass)}</v2:password>
+    </v2:getAllScheduledReportHistory>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+async function fetchBipJobs(base, user, pass) {
+  const url = base.replace(/\/+$/, "") + "/xmlpserver/services/v2/ScheduleService";
+  const target = viaProxy() ? "/fusion?url=" + encodeURIComponent(url) : url;
+  const all = [];
+  const seen = new Set();
+
+  for (let call = 0, beginIdx = 1; call < 20; call++) {
+    const resp = await fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": '""' },
+      body: bipEnvelope(user, pass, beginIdx),
+    });
+    const text = await resp.text();
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+
+    if (!resp.ok) {
+      const fault = doc.getElementsByTagNameNS("*", "faultstring")[0];
+      throw new Error("BIP ScheduleService: " + (fault ? fault.textContent.trim() : `HTTP ${resp.status} ${text.slice(0, 200)}`));
+    }
+
+    const items = doc.getElementsByTagNameNS("*", "item");
+    let freshCount = 0;
+    for (const el of items) {
+      const get = tag => { const n = [...el.children].find(c => c.localName === tag); return n ? n.textContent : ""; };
+      const job = {
+        instanceId: get("instanceId"), jobId: get("jobId"),
+        name: get("userJobName") || get("reportUrl") || "(unnamed)",
+        reportUrl: get("reportUrl"), status: get("status"), statusDetail: get("statusDetail"),
+        startDate: get("startDate"), endDate: get("endDate"),
+        owner: get("owner"), jobType: get("jobType"),
+      };
+      const key = job.instanceId || job.jobId + "|" + job.startDate;
+      if (!seen.has(key)) { seen.add(key); all.push(job); freshCount++; }
+    }
+    if (freshCount === 0) break;   // server repeated or exhausted the history
+    beginIdx += items.length;
+  }
+  return all;
+}
+
+const MAX_BIP_ROWS = 300;
+
+function renderBip(result, cutoffMs) {
+  $("bipCard").hidden = false;
+  $("bipError").hidden = true;
+  $("bipSummary").innerHTML = "";
+  $("bipBody").innerHTML = "";
+  $("bipEmpty").hidden = true;
+
+  if (result.status === "rejected") {
+    $("bipError").hidden = false;
+    const e = result.reason;
+    if (e instanceof TypeError && !viaProxy()) {
+      $("bipError").innerHTML = "The browser blocked the BIP SOAP call (CORS) — BIP report history only works when this page "
+        + "is served by the local proxy.<br><b>Fix:</b> double-click <b>start-fusion-job-monitor.command</b> (Mac) or "
+        + "<b>start-fusion-job-monitor.bat</b> (Windows), or run <b>python3 cors-proxy.py</b> — then use "
+        + "<b>http://localhost:8765/fusion-job-monitor.html</b>.";
+    } else {
+      $("bipError").textContent = e?.message || String(e);
+    }
+    return;
+  }
+
+  const jobs = result.value
+    .filter(j => { const t = Date.parse(j.startDate || ""); return !cutoffMs || !Number.isFinite(t) || t >= cutoffMs; })
+    .sort((a, b) => (Date.parse(b.startDate || "") || 0) - (Date.parse(a.startDate || "") || 0));
+
+  $("bipEmpty").hidden = jobs.length > 0;
+  if (jobs.length === 0) return;
+
+  const c = { failed: 0, succeeded: 0, warning: 0, running: 0, other: 0 };
+  jobs.forEach(j => c[bipBucket(j.status)]++);
+  $("bipSummary").innerHTML = `
+    <span><b>${jobs.length}</b> report job${jobs.length === 1 ? "" : "s"}</span>
+    <span class="s"><b>${c.succeeded}</b> succeeded</span>
+    <span class="f"><b>${c.failed}</b> failed</span>
+    <span><b>${c.running}</b> running</span>
+    ${c.warning ? `<span><b>${c.warning}</b> with warnings</span>` : ""}
+    ${c.other ? `<span><b>${c.other}</b> other</span>` : ""}
+    ${jobs.length > MAX_BIP_ROWS ? `<span>(showing newest ${MAX_BIP_ROWS})</span>` : ""}`;
+
+  $("bipBody").innerHTML = jobs.slice(0, MAX_BIP_ROWS).map(j => `
+    <tr title="${esc(j.statusDetail || "")}">
+      <td class="jobn">${esc(j.name)}</td>
+      <td>${chipFor(bipBucket(j.status), j.status)}</td>
+      <td>${fmtTime(j.startDate)}</td>
+      <td>${fmtTime(j.endDate)}</td>
+      <td>${fmtDuration(j.startDate, j.endDate)}</td>
+      <td>${esc(j.owner || "–")}</td>
+      <td class="rpt">${esc((j.reportUrl || "–").replace(/\.xdo$/, ""))}</td>
+    </tr>`).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendering                                                           */
+/* ------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function fmtTime(iso) {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "–";
+  return new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDuration(startIso, endIso) {
+  const a = Date.parse(startIso || ""), b = Date.parse(endIso || "");
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return "–";
+  const s = Math.round((b - a) / 1000);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+}
+
+function chipFor(bucket, label) {
+  const cls = { failed: "bad", succeeded: "ok", warning: "warn", running: "run", other: "" }[bucket];
+  const dot = { bad: "✕", ok: "✓", warn: "!", run: "●", "": "○" }[cls];
+  return `<span class="chip ${cls}"><span class="dot">${dot}</span>${esc(label || "UNKNOWN")}</span>`;
+}
+function chip(state) { return chipFor(classify(state), state); }
+
+function splitBar(j) {
+  const denom = Math.max(j.runs, 1);
+  const seg = (n, cls) => n > 0 ? `<span class="${cls}" style="flex:${n / denom}" title="${n}"></span>` : "";
+  const other = j.runs - j.succeeded - j.failed;
+  return `<div class="split" role="img" aria-label="${j.succeeded} succeeded, ${j.failed} failed, ${other} other">`
+       + seg(j.succeeded, "ok") + seg(j.failed, "bad") + seg(other, "oth") + `</div>`;
+}
+
+function renderPvo(runs) {
+  const pvo = runs.filter(isPvoRun)
+    .sort((a, b) => (Date.parse(b.submissionTime || "") || 0) - (Date.parse(a.submissionTime || "") || 0));
+
+  $("pvoCard").hidden = false;
+  $("pvoEmpty").hidden = pvo.length > 0;
+
+  const c = { failed: 0, succeeded: 0, warning: 0, running: 0, other: 0 };
+  pvo.forEach(it => c[classify(it.state)]++);
+  $("pvoSummary").innerHTML = pvo.length === 0 ? "" : `
+    <span><b>${pvo.length}</b> extract run${pvo.length === 1 ? "" : "s"}</span>
+    <span class="s"><b>${c.succeeded}</b> succeeded</span>
+    <span class="f"><b>${c.failed}</b> failed</span>
+    <span><b>${c.running}</b> running or queued</span>
+    ${c.warning ? `<span><b>${c.warning}</b> with warnings</span>` : ""}
+    ${c.other ? `<span><b>${c.other}</b> cancelled / other</span>` : ""}`;
+
+  $("pvoBody").innerHTML = pvo.map(it => `
+    <tr>
+      <td>${esc(it.requestId)}</td>
+      <td style="white-space:normal;min-width:200px">${esc(it.jobDisplayName || it.name || it.jobDefinitionId || it.definition || "(unnamed)")}</td>
+      <td>${chip(it.state)}</td>
+      <td>${esc(it.executableStatus || "–")}</td>
+      <td>${fmtTime(it.submissionTime)}</td>
+      <td>${fmtTime(it.processStartTime)}</td>
+      <td>${fmtDuration(it.processStartTime, it.processEndTime || it.completedTime)}</td>
+      <td>${esc(it.submitter || it.requestedBy || "–")}</td>
+    </tr>`).join("");
+}
+
+function render({ summary, jobList, runs }) {
+  $("tiles").hidden = false;
+  $("tableCard").hidden = false;
+  renderPvo(runs);
+
+  $("tTotal").textContent = summary.total;
+  $("tDistinct").textContent = jobList.length + " distinct job" + (jobList.length === 1 ? "" : "s");
+  $("tFailed").textContent = summary.failed;
+  $("tFailedPct").textContent = summary.total ? Math.round(summary.failed / summary.total * 100) + "% of runs" : "";
+  $("tSucceeded").textContent = summary.succeeded;
+  $("tWarning").textContent = summary.warning ? summary.warning + " completed with warnings" : "";
+  $("tRunning").textContent = summary.running;
+  $("tOther").textContent = summary.other ? summary.other + " cancelled / other" : "";
+
+  const body = $("jobsBody");
+  body.innerHTML = "";
+  $("emptyMsg").hidden = jobList.length > 0;
+
+  jobList.forEach((j, idx) => {
+    const other = j.runs - j.succeeded - j.failed;
+    const tr = document.createElement("tr");
+    tr.className = "jobrow";
+    tr.innerHTML = `
+      <td class="jobname"><span class="caret">▸</span>${esc(j.name)}</td>
+      <td class="num">${j.runs}</td>
+      <td class="num">${j.succeeded}</td>
+      <td class="num" style="${j.failed ? "color:var(--critical);font-weight:600" : ""}">${j.failed}</td>
+      <td class="num">${other}</td>
+      <td>${splitBar(j)}</td>
+      <td>${fmtTime(new Date(j.lastTime).toISOString())}</td>
+      <td>${chip(j.lastState)}</td>`;
+
+    const detail = document.createElement("tr");
+    detail.className = "detail";
+    detail.hidden = true;
+    detail.innerHTML = `<td colspan="8">
+      <table>
+        <thead><tr><th>Request ID</th><th>State</th><th>Submitted</th><th>Started</th><th>Duration</th><th>Submitted by</th></tr></thead>
+        <tbody>${j.items.map(it => `
+          <tr>
+            <td>${esc(it.requestId)}</td>
+            <td>${chip(it.state)}</td>
+            <td>${fmtTime(it.submissionTime)}</td>
+            <td>${fmtTime(it.processStartTime)}</td>
+            <td>${fmtDuration(it.processStartTime, it.processEndTime || it.completedTime)}</td>
+            <td>${esc(it.submitter || it.requestedBy || "–")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </td>`;
+
+    tr.addEventListener("click", () => {
+      detail.hidden = !detail.hidden;
+      tr.classList.toggle("open", !detail.hidden);
+    });
+    body.append(tr, detail);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                              */
+/* ------------------------------------------------------------------ */
+let refreshTimer = null;
+
+async function load() {
+  const base = $("baseUrl").value.trim();
+  const auth = basicAuth($("user").value.trim(), $("pass").value);
+  const status = $("statusLine");
+  const btn = $("applyBtn");
+
+  btn.disabled = true;
+  status.className = "statusline";
+  status.textContent = "Querying " + new URL(base).hostname + " …";
+
+  try {
+    sessionStorage.setItem("fjm.base", base);
+    sessionStorage.setItem("fjm.user", $("user").value.trim());
+
+    const range = $("range").value;
+    const allHistory = range === "all";
+    const cutoff = allHistory ? 0 : Date.now() - Number(range) * 3600e3;
+    const rangeText = allHistory ? "all history"
+      : range === "24" ? "last 24 hours"
+      : "last " + Number(range) / 24 + " days";
+    $("rangeLabel").textContent = rangeText;
+    $("tTotalLabel").textContent = "Job runs — " + rangeText;
+
+    const [essResult, bipResult] = await Promise.allSettled([
+      fetchRequests(base, auth, allHistory ? null : new Date(cutoff).toISOString().replace(/\.\d{3}Z$/, "Z")),
+      fetchBipJobs(base, $("user").value.trim(), $("pass").value),
+    ]);
+
+    renderBip(bipResult, cutoff);
+    if (essResult.status === "rejected") throw essResult.reason;
+
+    // Diagnostic: distinct ESS job definitions, for tuning the PVO/BICC matcher
+    const defs = {};
+    essResult.value.forEach(it => {
+      const k = (it.jobDisplayName || it.name || "?") + "  |  " + (it.definition || it.jobDefinitionId || "?");
+      defs[k] = (defs[k] || 0) + 1;
+    });
+    console.log("Distinct job definitions in this result set:");
+    console.table(Object.entries(defs).map(([def, count]) => ({ definition: def, runs: count })));
+
+    render(aggregate(essResult.value, cutoff));
+    const bipNote = bipResult.status === "fulfilled" ? `, ${bipResult.value.length} BIP job(s)` : " (BIP query failed — see BIP section)";
+    status.textContent = `Last updated ${new Date().toLocaleTimeString()} — ${essResult.value.length} ESS request(s)${bipNote}.`;
+  } catch (e) {
+    status.className = "statusline error";
+    if (e instanceof TypeError) {
+      status.innerHTML = "Could not reach Fusion — this is usually the browser blocking a cross-origin (CORS) request."
+        + '<span class="hint">Fix: run <b>python3 cors-proxy.py</b> in this folder and open '
+        + "<b>http://localhost:8765/fusion-job-monitor.html</b> instead, or ask your Fusion admin to allowlist this page's origin.</span>";
+    } else {
+      status.textContent = e.message;
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("connForm").addEventListener("submit", e => { e.preventDefault(); load(); });
+
+$("autoRefresh").addEventListener("change", e => {
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+  if (e.target.checked) refreshTimer = setInterval(() => { if ($("baseUrl").value && $("pass").value) load(); }, 60_000);
+});
+
+// Restore base URL / username (never the password) for convenience
+$("baseUrl").value = sessionStorage.getItem("fjm.base") || "";
+$("user").value = sessionStorage.getItem("fjm.user") || "";
+</script>
+</body>
+</html>
